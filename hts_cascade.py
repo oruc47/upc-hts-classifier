@@ -33,6 +33,7 @@ import json
 import os
 import random
 import re
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -278,7 +279,7 @@ def parse_json_reply(text):
     return None
 
 
-def ask_ollama(prompt, allowed_codes):
+def ask_ollama(prompt, allowed_codes, timeout=300):
     """Ask for one code from allowed_codes. Returns the code, or None after 3 failed tries."""
     schema = {
         "type": "object",
@@ -299,7 +300,7 @@ def ask_ollama(prompt, allowed_codes):
             data = json.dumps(body).encode("utf-8")
             request = urllib.request.Request(OLLAMA_URL, data=data,
                                              headers={"Content-Type": "application/json"})
-            with urllib.request.urlopen(request, timeout=900) as response:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
                 reply = json.loads(response.read())
             text = reply["message"]["content"]
             answer = parse_json_reply(text)
@@ -322,6 +323,32 @@ def ask_ollama(prompt, allowed_codes):
             print("  Ollama call failed:", repr(error)[:200])
         time.sleep(2)
     return None
+
+
+def load_model():
+    """Load the model before starting, report how long it took, and warn if it
+    doesn't fit in GPU memory (then it runs mostly on the CPU and is very slow)."""
+    print(f"Loading {SETTINGS['model']} into memory (can take a few minutes the first time)...")
+    start = time.time()
+    if ask_ollama('Reply with {"code": "OK"}', ["OK"], timeout=1800) is None:
+        sys.exit("The model did not answer. Look at the terminal running 'ollama serve' for an error.")
+    print(f"Model loaded and answering after {time.time() - start:.0f} s")
+
+    try:
+        url = OLLAMA_URL.rsplit("/api/", 1)[0] + "/api/ps"
+        with urllib.request.urlopen(url, timeout=30) as response:
+            running = json.loads(response.read()).get("models", [])
+    except Exception:
+        return  # only a check; carry on if it fails
+    for model in running:
+        if model.get("name") != SETTINGS["model"] and model.get("model") != SETTINGS["model"]:
+            continue
+        size, on_gpu = model.get("size", 0), model.get("size_vram", 0)
+        if size and on_gpu < 0.99 * size:
+            print(f"\nWARNING: only {100 * on_gpu / size:.0f}% of the model ({size / 1e9:.0f} GB) is in GPU "
+                  "memory. The rest runs on the CPU, which is very slow. This Mac probably does not "
+                  "have enough memory for this model, or another model is still loaded "
+                  "(run 'ollama ps' to check, 'ollama stop <model>' to unload).\n")
 
 
 # ---------------------------------------------------------------------------
@@ -494,6 +521,8 @@ def main():
     SETTINGS["model"] = args.model
     SETTINGS["think"] = args.think
     SETTINGS["num_ctx"] = args.num_ctx
+    # Print each line right away, even when the output goes through tee into a log file.
+    sys.stdout.reconfigure(line_buffering=True)
 
     notes = load_notes(args.notes)
     tree = build_tree(args.hts, notes)
@@ -514,6 +543,9 @@ def main():
             done = {row["REAL_UPC"] for row in csv.DictReader(f) if row["HTS10_LOCAL"]}
     todo = [it for it in items if it["REAL_UPC"] not in done]
     print(f"{len(items)} products, {len(done)} already done, {len(todo)} to do")
+    if todo:
+        load_model()
+        print(f"Classifying (about 3-11 model calls per product; progress every 5 products)...")
 
     new_file = not os.path.exists(args.output)
     out = open(args.output, "a", newline="", encoding="utf-8")
@@ -544,7 +576,7 @@ def main():
                 steps_file.write(json.dumps({"REAL_UPC": item["REAL_UPC"], "steps": steps}) + "\n")
                 out.flush()
                 steps_file.flush()
-            if n % 25 == 0 or n == len(todo):
+            if n % 5 == 0 or n == len(todo):
                 rate = (time.time() - start) / n
                 print(f"  {n}/{len(todo)} done, {rate:.2f} s per product, {failed} failed")
     out.close()

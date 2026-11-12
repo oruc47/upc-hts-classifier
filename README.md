@@ -149,3 +149,18 @@ python3 make_review.py results/all_qwen36.csv --n 1000 --out results/review_all_
 Rough time for 300,000 products on a 128 GB Mac: Qwen 3–6 days, gpt-oss 2–4 weeks
 (products with identical text are classified once). On a cluster GPU with vLLM it
 would be hours rather than days; that needs a small change to the code.
+
+## Troubleshooting
+
+**Nothing happens after `ollama pull` says "success".** The script next loads the
+model into memory and prints `Loading ... into memory`, then `Model loaded and
+answering after N s`. Loading can take a few minutes the first time. After that a
+progress line appears every 5 products.
+
+**A WARNING says only part of the model is in GPU memory.** The Mac does not have
+enough memory for that model (gpt-oss 120B needs about 65 GB, Qwen about 39 GB), or
+another model is still loaded. Run `ollama ps` to see what is loaded and
+`ollama stop <model>` to unload it. Run one test at a time, not both at once.
+
+**"The model did not answer".** Look at the terminal running `ollama serve` for an
+error message. If Ollama seems stuck, stop it with Ctrl-C and start it again.
