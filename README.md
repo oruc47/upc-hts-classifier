@@ -67,8 +67,15 @@ Two choices that go slightly beyond the paper's text:
    cd upc-hts-classifier
    cp /path/to/claude_hts10_first100.csv data/
    ```
-   An input CSV needs the columns `REAL_UPC`, `BRAND`, `CATEGORY`, `PROD_DESC`
-   (`COMPANY` is optional and ignored).
+   An input file needs a UPC column and a product-description column. Column names
+   can be in any case (`upc` or `REAL_UPC`, `prod_desc` or `PROD_DESC`), and the file
+   can be comma- or tab-separated, including files saved from Excel. `brand` and
+   `category` are used if present; `company` is ignored. For example:
+   ```
+   upc,prod_desc,brand,category,company
+   4470001988,OSCAR MAYER SLICED BACON 1988,OSCAR MAYER,BACON,KRAFT HEINZ
+   ```
+   If Excel shows UPCs as `4.47E+09`, format the column as Text before saving.
 
 ## Running the tests
 

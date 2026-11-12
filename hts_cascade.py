@@ -21,8 +21,9 @@ Usage:
 
 (Defaults: model qwen3.6:35b-a3b-q8_0 with reasoning off, 8 parallel requests.)
 
-Input CSV needs columns REAL_UPC and PROD_DESC (BRAND and CATEGORY are used if
-present, unless --desc-only). A stopped run continues where it left off when the
+The input file needs a UPC column and a description column (e.g. upc / prod_desc
+or REAL_UPC / PROD_DESC, any case, comma- or tab-separated). Brand and category are
+used if present, unless --desc-only. A stopped run continues where it left off when the
 same command is run again.
 """
 
@@ -391,6 +392,74 @@ def classify(tree, item_text):
     return final, path, steps, calls
 
 
+# ---------------------------------------------------------------------------
+# Reading product files
+# ---------------------------------------------------------------------------
+
+# Accepted column names (compared after upper-casing and turning spaces and
+# dashes into underscores) -> the name used in this code.
+COLUMN_NAMES = {
+    "REAL_UPC": "REAL_UPC", "UPC": "REAL_UPC", "UPC_CODE": "REAL_UPC",
+    "PROD_DESC": "PROD_DESC", "PRODUCT_DESCRIPTION": "PROD_DESC", "DESCRIPTION": "PROD_DESC",
+    "DESC": "PROD_DESC", "UPC_DESCR": "PROD_DESC", "UPC_DESCRIPTION": "PROD_DESC",
+    "BRAND": "BRAND", "BRAND_DESCR": "BRAND", "BRAND_NAME": "BRAND",
+    "CATEGORY": "CATEGORY", "CATEGORY_DESCR": "CATEGORY", "PRODUCT_CATEGORY": "CATEGORY",
+    "COMPANY": "COMPANY", "MANUFACTURER": "COMPANY",
+}
+
+
+def read_products(path, required=("REAL_UPC", "PROD_DESC")):
+    """Read a product file into a list of dicts with standard column names.
+
+    Accepts comma-, tab-, semicolon- or bar-separated files, column names in any
+    case (e.g. "upc", "prod_desc"), and files saved by Excel in other encodings.
+    BRAND, CATEGORY and COMPANY are set to "" when the file doesn't have them.
+    """
+    with open(path, "rb") as f:
+        raw = f.read()
+    if raw.startswith(b"\xff\xfe") or raw.startswith(b"\xfe\xff"):
+        text = raw.decode("utf-16")          # Excel "Unicode Text"
+    else:
+        try:
+            text = raw.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            text = raw.decode("cp1252")      # older Excel CSV on Windows/Mac
+
+    lines = text.splitlines()
+    if not lines:
+        raise SystemExit(f"{path} is empty")
+    try:
+        delimiter = csv.Sniffer().sniff(lines[0], delimiters=",\t;|").delimiter
+    except csv.Error:
+        delimiter = ","
+
+    reader = csv.reader(lines, delimiter=delimiter)
+    header = next(reader)
+    names = []
+    for column in header:
+        simple = re.sub(r"[\s\-]+", "_", column.strip()).upper()
+        names.append(COLUMN_NAMES.get(simple, simple))
+
+    missing = [name for name in required if name not in names]
+    if missing:
+        raise SystemExit(
+            f"{path}: missing column(s) {', '.join(missing)}.\n"
+            f"Columns found: {', '.join(header)}\n"
+            "Needed: a UPC column (e.g. upc or REAL_UPC) and a description column "
+            "(e.g. prod_desc or PROD_DESC); brand and category are optional."
+        )
+
+    products = []
+    for values in reader:
+        if not any(v.strip() for v in values):
+            continue  # skip blank lines
+        row = {name: value.strip() for name, value in zip(names, values)}
+        for name in ("BRAND", "CATEGORY", "COMPANY"):
+            row.setdefault(name, "")
+        products.append(row)
+    return products
+
+
 def item_text_for(item, desc_only):
     if desc_only or not item.get("BRAND"):
         return item["PROD_DESC"]
@@ -431,8 +500,7 @@ def main():
     leaves = sum(1 for node in tree.values() if not node["children"])
     print(f"HTS tree: {len(tree)} nodes, {leaves} leaves, {len(notes)} clarifying notes")
 
-    with open(args.input, encoding="utf-8-sig") as f:
-        items = list(csv.DictReader(f))
+    items = read_products(args.input)
     if args.sample and args.sample < len(items):
         random.seed(args.seed)
         items = random.sample(items, args.sample)
@@ -471,7 +539,7 @@ def main():
             if not code:
                 failed += 1  # not written; retried on the next run
             else:
-                writer.writerow([item["REAL_UPC"], item.get("BRAND", ""), item.get("CATEGORY", ""),
+                writer.writerow([item["REAL_UPC"], item["BRAND"], item["CATEGORY"],
                                  item["PROD_DESC"], code, len(code), calls, " > ".join(path), args.model])
                 steps_file.write(json.dumps({"REAL_UPC": item["REAL_UPC"], "steps": steps}) + "\n")
                 out.flush()

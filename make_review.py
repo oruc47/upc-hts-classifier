@@ -18,7 +18,7 @@ import argparse
 import csv
 import os
 
-from hts_cascade import build_tree
+from hts_cascade import build_tree, read_products
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LEVELS = (10, 8, 6, 4, 2)
@@ -105,7 +105,7 @@ def main():
 
     reference = {}
     if args.reference and os.path.exists(args.reference):
-        for row in read_csv(args.reference):
+        for row in read_products(args.reference, required=("REAL_UPC",)):
             if row.get("HTS10_CLAUDE"):
                 reference[row["REAL_UPC"]] = row["HTS10_CLAUDE"]
         print(f"Claude reference: {len(reference)} coded products")
