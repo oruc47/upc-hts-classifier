@@ -1,0 +1,9 @@
+# Results and logs are produced locally.
+results/
+__pycache__/
+.DS_Store
+
+# Product-level data (UPCs, brands, descriptions) may be licensed: keep it out of git.
+# Only the public HTS schedule is committed.
+data/*
+!data/htsdata.csv
